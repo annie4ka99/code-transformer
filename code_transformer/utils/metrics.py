@@ -3,6 +3,7 @@ from typing import Union
 
 import torch
 from rouge import Rouge
+from sacrebleu.metrics import BLEU, CHRF
 
 
 def get_best_non_unk_predictions(logits: torch.Tensor, unk_id):
@@ -245,6 +246,21 @@ def f1_score(logits, labels, pad_id=None, unk_id=None, predictions_provided=Fals
         return mean(f1s)
 
 
+def f1_scores(logits, labels, pad_id=None, unk_id=None, predictions_provided=False, output_precision_recall=False):
+    if predictions_provided:
+        predictions = logits
+    else:
+        predictions = logits.argmax(-1) if unk_id is None else get_best_non_unk_predictions(logits, unk_id)
+    scores = [get_micro_precision_recall_f1(pred, label, unk_id=unk_id, pad_id=pad_id, predictions_provided=True)
+              for pred, label in zip(predictions, labels)]
+
+    precisions, recalls, f1s = zip(*scores)
+    if output_precision_recall:
+        return f1s, precisions, recalls
+    else:
+        return f1s
+
+
 def filter_impossible_names(tokens, impossible_names):
     return [t for t in tokens if t not in impossible_names]
 
@@ -311,6 +327,20 @@ def calculate_results(true_positive, false_positive, false_negative):
     return precision, recall, f1
 
 
+def get_tp_fp_fn(logits, labels, pad_id=None, unk_id=None, predictions_provided=False):
+    if predictions_provided:
+        predictions = logits
+    else:
+        predictions = logits.argmax(-1) if unk_id is None else get_best_non_unk_predictions(logits, unk_id)
+    scores = [calculate_metrics(pred.squeeze() if isinstance(pred, torch.Tensor) else pred, 
+                                label.squeeze() if isinstance(label, torch.Tensor) else label, 
+                                pad_id=pad_id, unk_id=unk_id)
+              for pred, label in zip(predictions, labels)]
+
+    tp, fp, fn = zip(*scores)
+    return tp, fp, fn
+
+
 def get_micro_precision_recall_f1(logits: torch.Tensor, labels: torch.Tensor, pad_id=None, unk_id=None,
                                   predictions_provided=False):
     if predictions_provided:
@@ -335,7 +365,7 @@ def micro_recall(logits: torch.Tensor, labels: torch.Tensor, pad_id=None, unk_id
     return get_micro_precision_recall_f1(logits, labels, pad_id, unk_id, predictions_provided)[1]
 
 
-def compute_rouge(logits: Union[torch.Tensor, list], labels: torch.Tensor, pad_id=None, predictions_provided=False):
+def compute_rouge(logits: Union[torch.Tensor, list], labels: torch.Tensor, pad_id=None, predictions_provided=False, per_sample=False):
     if isinstance(logits, torch.Tensor):
         if len(logits.shape) == 4:
             # Flatten first two dimensions, if batch size and num_predict is given
@@ -358,7 +388,7 @@ def compute_rouge(logits: Union[torch.Tensor, list], labels: torch.Tensor, pad_i
     targets = [" ".join([str(t.item()) for t in target if pad_id is None or t.item() != pad_id]).lower()
                for target in labels]
     rouge = Rouge()
-    scores = rouge.get_scores(hyps=predictions, refs=targets, avg=True)
+    scores = rouge.get_scores(hyps=predictions, refs=targets, avg=(not per_sample))
     return scores
 
 
