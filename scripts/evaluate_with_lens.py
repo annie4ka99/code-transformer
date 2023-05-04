@@ -30,12 +30,12 @@ from code_transformer.utils.inference import decode_predicted_tokens
 from code_transformer.env import DATA_PATH_STAGE_2
 
 
-def evaluate(model, run_id, snapshot_iteration, save_path, partition='valid', batch_size=8, limit_tokens = 1000, no_gpu=False):
-    if model == 'code_transformer':
+def evaluate(model_type, run_id, snapshot_iteration, save_path, partition='valid', batch_size=8, limit_tokens = 1000, no_gpu=False):
+    if model_type == 'code_transformer':
         model_manager = CodeTransformerModelManager()
-    elif model == 'great':
+    elif model_type == 'great':
         model_manager = GreatModelManager()
-    elif model == 'xl_net':
+    elif model_type == 'xl_net':
         model_manager = XLNetModelManager()
     else:
         raise ValueError(f"Unknown model type `{model}`")
@@ -68,7 +68,7 @@ def evaluate(model, run_id, snapshot_iteration, save_path, partition='valid', ba
             DistanceBinning(num_bins, distance_binning_config['n_fixed_bins'], trans_func))
 
     use_pointer_network = config['data_setup']['use_pointer_network']
-    if model in {'great'}:
+    if model_type in {'great'}:
         dataset_type = 'great'
     elif 'use_only_ast' in config['data_setup'] and config['data_setup']['use_only_ast']:
         dataset_type = 'only_ast'
@@ -125,6 +125,7 @@ def evaluate(model, run_id, snapshot_iteration, save_path, partition='valid', ba
 
     for i, batch in progress:
         batch = batch_filter_distances(batch, relative_distances)
+        
         if not no_gpu:
             batch = batch_to_device(batch)
 
@@ -145,10 +146,21 @@ def evaluate(model, run_id, snapshot_iteration, save_path, partition='valid', ba
         label = label.squeeze(1)
         labels.extend(label)
 
-        best_non_unk_predictions = get_best_non_unk_predictions(output.logits, unk_id=unk_id)
+        best_non_unk_predictions = get_best_non_unk_predictions(output.logits, unk_id=unk_id).squeeze(1)
+        # print(best_non_unk_predictions.shape)
         for i in range(len(best_non_unk_predictions)):
-            predicted_method_name = ' '.join(decode_predicted_tokens(best_non_unk_predictions[i], batch, data_manager))
+            predicted_method_name = decode_predicted_tokens(best_non_unk_predictions[i], batch, data_manager)
+            if len(predicted_method_name) == 0:
+                predicted_method_name = 'EMPTY'
+            else:
+                predicted_method_name = ' '.join(predicted_method_name)
+            
             gt_method_name = ' '.join(decode_predicted_tokens(label[i], batch, data_manager))
+            if len(gt_method_name) == 0:
+                gt_method_name = 'EMPTY'
+            else:
+                gt_method_name = ' '.join(gt_method_name)
+
             chrf_scores.append(chrf_metric.sentence_score(predicted_method_name, [gt_method_name]))
 
         progress.set_description()
@@ -160,7 +172,6 @@ def evaluate(model, run_id, snapshot_iteration, save_path, partition='valid', ba
 
     predictions = torch.stack(predictions)
     labels = torch.stack(labels)
-    pred = torch.cat(best_non_unk_predictions)
 
     scores = compute_rouge(predictions, labels, pad_id=pad_id, predictions_provided=True, per_sample=True)
 
@@ -190,5 +201,5 @@ if __name__ == '__main__':
     parser.add_argument("limit_tokens", type=int, default=1000)
     parser.add_argument("--no-gpu", action='store_true', default=False)
     args = parser.parse_args()
-    evaluate(args.model, args.snapshot_iteration, args.partition, args.batch_size, args.limit_tokens, args.no_gpu)
+    evaluate(args.model, args.run_id, args.snapshot_iteration, args.save_path, args.partition, args.batch_size, args.limit_tokens, args.no_gpu)
 
