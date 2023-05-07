@@ -87,6 +87,8 @@ class TransformerLMDecoder(nn.Module):
         if self.use_separate_vocab:
             self.target_token_embedding = nn.Embedding(self.vocab_size, self.d_model)
 
+        self.samples_len_weights = config.samples_len_weights
+
         self._reset_parameters()
 
     def _reset_parameters(self):
@@ -100,6 +102,7 @@ class TransformerLMDecoder(nn.Module):
                 labels=None,
                 extended_vocabulary_ids=None,
                 pointer_pad_mask: Optional[torch.Tensor] = None,
+                sequence_lengths=None,
                 **model_input) -> CodeTransformerOutput:
         """
         :param labels:
@@ -245,7 +248,12 @@ class TransformerLMDecoder(nn.Module):
             next_input = torch.cat([decoder_input, next_input_embedding], 1)
             decoder_input = next_input
 
-        loss = self.loss_fct(logits.transpose(0, 1).reshape(-1, logits.size(-1)), labels.view(-1))
+        if self.samples_len_weights is not None:
+            weights = [self.samples_len_weights[length] for length in sequence_lengths for _ in range(labels.size()[-1])]
+            weights = torch.tensor(weights, device=device)
+            loss = self.loss_fct(logits.transpose(0, 1).reshape(-1, logits.size(-1)), labels.view(-1), weights)
+        else:
+            loss = self.loss_fct(logits.transpose(0, 1).reshape(-1, logits.size(-1)), labels.view(-1))
 
         logits = logits.transpose(0, 1).unsqueeze(1)  # B x 1 x output_subtokens x V
         logits = logits.reshape(B // n_predict, n_predict, logits.shape[2], logits.shape[3])

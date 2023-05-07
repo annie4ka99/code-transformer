@@ -333,7 +333,9 @@ class CTCodeSummarizationDatasetNoPunctuation(CTCodeSummarizationDataset):
 
     def __init__(self, data_manager: CTPreprocessedDataManager, token_distances=None, max_distance_mask=None,
                  num_sub_tokens=5, num_sub_tokens_output=5, use_token_types=True,
-                 use_pointer_network=False, max_num_tokens=MAX_NUM_TOKENS):
+                 use_pointer_network=False, max_num_tokens=MAX_NUM_TOKENS,
+                 length_bins_num=None, max_samples_per_bin=None
+                 ):
         super(CTCodeSummarizationDatasetNoPunctuation, self).__init__(data_manager, token_distances, max_distance_mask,
                                                                       num_sub_tokens, num_sub_tokens_output,
                                                                       use_token_types,
@@ -342,7 +344,18 @@ class CTCodeSummarizationDatasetNoPunctuation(CTCodeSummarizationDataset):
         self.config = data_manager.load_config()
         self.max_num_tokens_no_punctuation = max_num_tokens
 
+        self.length_bins_num = length_bins_num
+        self.max_samples_per_bin = max_samples_per_bin
+        if length_bins_num:
+            self.length_counts = [0 for _ in range(length_bins_num)]
+            self.filled_bins = 0
+            self.bin_size = max_num_tokens // length_bins_num
+
     def __next__(self):
+        if self.length_bins_num and self.filled_bins >= self.length_bins_num:
+            self.length_counts = [0 for _ in range(self.length_bins_num)]
+            self.filled_bins = 0
+
         sample = super(CTCodeSummarizationDatasetNoPunctuation, self).__next__()
 
         # Calculate indices of tokens that should be kept, i.e., are tokens like identifiers or types
@@ -351,8 +364,20 @@ class CTCodeSummarizationDatasetNoPunctuation(CTCodeSummarizationDataset):
 
         if self.max_num_tokens_no_punctuation is not None and len(idx) > self.max_num_tokens_no_punctuation + 1:
             # too many tokens
-            logger.warn(f"Snippet has {len(idx)} tokens exceeding the limit of {self.max_num_tokens_no_punctuation}")
+            # logger.warn(f"Snippet has {len(idx)} tokens exceeding the limit of {self.max_num_tokens_no_punctuation}")
+            del sample
             return self.__next__()
+        
+        if self.length_bins_num:
+            bin_id = max(0, len(idx) - 2) // self.bin_size
+
+            if self.length_counts[bin_id] >= self.max_samples_per_bin:
+                del sample
+                return self.__next__()
+            
+            self.length_counts[bin_id] += 1
+            if self.length_counts[bin_id] == self.max_samples_per_bin:
+                self.filled_bins += 1
 
         # In case there was a punctuation token before the function definition, the label ids have to be shifted as well
         idx_func_tokens_no_punctuation = []

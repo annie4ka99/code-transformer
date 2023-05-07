@@ -25,4 +25,5 @@ class CodeTransformerDecoder(TransformerLMDecoder):
                             need_weights=need_weights,
                             extended_vocabulary_ids=batch.extended_vocabulary_ids,
                             pointer_pad_mask=batch.pointer_pad_mask,
-                            languages=batch.languages)
+                            languages=batch.languages,
+                            sequence_lengths = batch.sequence_lengths)

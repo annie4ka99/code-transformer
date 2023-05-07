@@ -1,6 +1,7 @@
 from abc import ABC
 
 from torch.nn import CrossEntropyLoss
+import numpy as np
 
 from code_transformer.configuration.transformer_lm_decoder import TransformerLMDecoderConfig
 from code_transformer.experiments.experiment import ExperimentSetup, ex
@@ -13,16 +14,24 @@ from code_transformer.utils.loss import LabelSmoothingLoss
 class CodeTransformerDecoderMixin(ExperimentSetup, ABC):
 
     @ex.capture(prefix="model")
-    def _init_model(self, lm_encoder: dict, lm_decoder: dict, with_cuda: bool, label_smoothing=None):
+    def _init_model(self, lm_encoder: dict, lm_decoder: dict, with_cuda: bool, label_smoothing=None, samples_len_weights=None):
         if hasattr(self.dataset_train, 'num_sub_tokens_output'):
             num_sub_tokens_output = self.dataset_train.num_sub_tokens_output
         else:
             num_sub_tokens_output = 5
 
         self.model_manager = CodeTransformerModelManager()
+
+        if samples_len_weights:
+            with open(samples_len_weights, 'rb') as f:
+                self.samples_len_weights = np.load(samples_len_weights)
+        else:
+            self.samples_len_weights = None
+
         if hasattr(self, 'pretrained_model'):
             self.model_lm = self.pretrained_model
             self.model_lm.output_subtokens_per_token = num_sub_tokens_output
+            self.model_lm.samples_len_weights = self.samples_len_weights
         else:
             lm_encoder = self.generate_transformer_lm_encoder_config(lm_encoder)
 
@@ -39,10 +48,13 @@ class CodeTransformerDecoderMixin(ExperimentSetup, ABC):
                 use_pointer_network=self.use_pointer_network if hasattr(self, "use_pointer_network") else False,
                 output_subtokens_per_token=num_sub_tokens_output,
                 target_vocab_size=len(self.method_name_vocab) if self.use_separate_vocab else None,
-                **lm_decoder
+                **lm_decoder,
+                samples_len_weights=self.samples_len_weights
             )
 
             self.model_lm = CodeTransformerDecoder(model_config)
+        
+        print("samples len weights:", self.model_lm.samples_len_weights)
 
         if hasattr(self, "freeze_encoder_layers"):
             layers = self.model_lm.lm_encoder.transformer.layers

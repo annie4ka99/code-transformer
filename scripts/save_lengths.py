@@ -9,9 +9,9 @@ from argparse import ArgumentParser
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import csv
+import numpy as np
 import gc
-from sacrebleu.metrics import CHRF
+import os
 
 from code_transformer.modeling.constants import PAD_TOKEN, UNKNOWN_TOKEN, NUM_SUB_TOKENS_METHOD_NAME
 from code_transformer.modeling.modelmanager import GreatModelManager, XLNetModelManager
@@ -24,8 +24,6 @@ from code_transformer.preprocessing.dataset.code_summarization import CTCodeSumm
 from code_transformer.preprocessing.graph.binning import ExponentialBinning, EqualBinning
 from code_transformer.preprocessing.graph.distances import DistanceBinning
 from code_transformer.preprocessing.graph.transform import TokenDistancesTransform
-from code_transformer.utils.metrics import get_tp_fp_fn, compute_rouge, get_best_non_unk_predictions
-from code_transformer.utils.inference import decode_predicted_tokens
 
 from code_transformer.env import DATA_PATH_STAGE_2
 
@@ -49,12 +47,7 @@ def save_lengths(model_type, run_id, snapshot_iteration, save_path, partition='v
     data_manager = CTBufferedDataManager(DATA_PATH_STAGE_2,
                                          config['data_setup']['language'],
                                          partition=partition,
-                                         shuffle=False)
-    vocabularies = data_manager.load_vocabularies()
-    if len(vocabularies) == 3:
-        word_vocab, _, _ = vocabularies
-    else:
-        word_vocab, _, _, _ = vocabularies
+                                         shuffle=False)  
 
     token_distances = None
     if TokenDistancesTransform.name in config['data_transforms']['relative_distances']:
@@ -109,59 +102,16 @@ def save_lengths(model_type, run_id, snapshot_iteration, save_path, partition='v
 
     relative_distances = config['data_transforms']['relative_distances']
 
-    pad_id = word_vocab[PAD_TOKEN]
-    unk_id = word_vocab[UNKNOWN_TOKEN]
-
-    predictions = []
-    labels = []
-    losses = []
     lengths = []
-    tps = []
-    fps = []
-    fns = []
-    chrf_scores = []
     progress = tqdm(enumerate(dataloader), total=int(data_manager.approximate_total_samples() / batch_size))
-    chrf_metric = CHRF()
 
-    for i, batch in progress:
+    for _, batch in progress:
         batch = batch_filter_distances(batch, relative_distances)
         
         if not no_gpu:
             batch = batch_to_device(batch)
-
-        label = batch.labels.detach().cpu()
-
-        with torch.no_grad():
-            output = model.forward_batch(batch).cpu()
-        losses.append(output.loss.item())
-        tp, fp, fn = get_tp_fp_fn(output.logits, label, pad_id=pad_id, unk_id=unk_id)
         
         lengths.extend(batch.sequence_lengths.tolist())
-        tps.extend(tp)
-        fps.extend(fp)
-        fns.extend(fn)
-
-        batch_logits = output.logits.detach().cpu()
-        predictions.extend(batch_logits.argmax(-1).squeeze(1))
-        label = label.squeeze(1)
-        labels.extend(label)
-
-        best_non_unk_predictions = get_best_non_unk_predictions(output.logits, unk_id=unk_id).squeeze(1)
-        # print(best_non_unk_predictions.shape)
-        for i in range(len(best_non_unk_predictions)):
-            predicted_method_name = decode_predicted_tokens(best_non_unk_predictions[i], batch, data_manager)
-            if len(predicted_method_name) == 0:
-                predicted_method_name = 'EMPTY'
-            else:
-                predicted_method_name = ' '.join(predicted_method_name)
-            
-            gt_method_name = ' '.join(decode_predicted_tokens(label[i], batch, data_manager))
-            if len(gt_method_name) == 0:
-                gt_method_name = 'EMPTY'
-            else:
-                gt_method_name = ' '.join(gt_method_name)
-
-            chrf_scores.append(chrf_metric.sentence_score(predicted_method_name, [gt_method_name]))
 
         progress.set_description()
         del batch
@@ -170,36 +120,34 @@ def save_lengths(model_type, run_id, snapshot_iteration, save_path, partition='v
 
     data_manager.shutdown()
 
-    predictions = torch.stack(predictions)
-    labels = torch.stack(labels)
-
-    scores = compute_rouge(predictions, labels, pad_id=pad_id, predictions_provided=True, per_sample=True)
-
     print(f"Storing metrics into {save_path}")
-    with open(save_path, 'w', newline='') as csvfile:     
-        writer = csv.writer(csvfile)
-        writer.writerow(['length', 'tp', 'fp', 'fn', 'rouge1-f', 'rouge2-f', 'rougeL-f', 'chrf'])
-
-        for i in range(len(lengths)):
-            writer.writerow([lengths[i], 
-                             tps[i], fps[i], fns[i],
-                             scores[i]['rouge-1']['f'], scores[i]['rouge-2']['f'], scores[i]['rouge-l']['f'],
-                             chrf_scores[i]
-                             ])
+    with open(save_path, 'wb') as f:     
+        np.save(f, np.array(lengths))    
 
 
 
 if __name__ == '__main__':
-    parser = ArgumentParser()
-    parser.add_argument("model",
-                        choices=['code_transformer', 'xl_net', 'great'])
-    parser.add_argument("run_id", type=str)
-    parser.add_argument("snapshot_iteration", type=str)
-    parser.add_argument("save_path", type=str)
-    parser.add_argument("partition", type=str, choices=['train', 'valid', 'test'], default='valid')
-    parser.add_argument("batch_size", type=int, default=8)
-    parser.add_argument("limit_tokens", type=int, default=1000)
-    parser.add_argument("--no-gpu", action='store_true', default=False)
-    args = parser.parse_args()
-    evaluate(args.model, args.run_id, args.snapshot_iteration, args.save_path, args.partition, args.batch_size, args.limit_tokens, args.no_gpu)
+    snapshot = 'latest'
+    batch_size = 128
+    limit_tokens = 512
+    models = [dict(model='code_transformer',    label='CT', run_ids=range(5, 9)), 
+            dict(model='great',               label='GT', run_ids=range(1, 5)),
+            dict(model='xl_net',              label='XL', run_ids=range(1, 5))]
+    results_dir = 'samples_info'
+
+    csn_langs = ['python', 'javascript', 'ruby', 'go']
+    os.makedirs(results_dir, exist_ok=True)
+    for model_info in models:
+        model = model_info['model']
+        label = model_info['label']
+        for run_id in model_info['run_ids']:
+            model_id = f'{label}-{run_id}'
+            lang = csn_langs[(run_id - 1) % 4]
+            for partition in ['train', 'valid']:
+                save_path = os.path.join(results_dir, f"lengths-{model}-{lang}-{partition}.npy")
+                if os.path.exists(save_path):
+                    print(f'{model} {model_id} for {lang} on {partition} already evaluated')
+                else:
+                    save_lengths(model, model_id, snapshot, save_path, partition, batch_size, limit_tokens, no_gpu=True)
+                print('------------------------------------------------')
 

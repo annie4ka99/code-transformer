@@ -4,11 +4,12 @@ import sys
 from abc import abstractmethod
 from itertools import islice
 from statistics import mean
+import numpy as np
 
 import torch
 from sacred import Experiment
 from torch import optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from tqdm import tqdm
 
 from code_transformer.configuration.transformer_lm_encoder import TransformerLMEncoderConfig
@@ -332,7 +333,10 @@ class ExperimentSetup:
             n_tokens_accumulate_batch = 0
 
         epoch = 1
-        progress_bar = tqdm(total=int(self.data_manager.approximate_total_samples() / batch_size))
+        total_samples = (int(self.dataset_train.length_bins_num * self.dataset_train.max_samples_per_bin / batch_size)
+                         if hasattr(self.dataset_train, 'length_bins_num') and self.dataset_train.length_bins_num is not None 
+                         else int(self.data_manager.approximate_total_samples() / batch_size))
+        progress_bar = tqdm(total=total_samples)
         progress_bar.set_description(f"Epoch {epoch}")
 
         # Ensure graceful shutdown when training is interrupted
@@ -435,7 +439,7 @@ class ExperimentSetup:
 
                 progress_bar.update()
                 if progress_bar.n >= progress_bar.total:
-                    progress_bar = tqdm(total=int(self.data_manager.approximate_total_samples() / batch_size))
+                    progress_bar = tqdm(total=total_samples)
                     epoch += 1
                     progress_bar.set_description(f"Epoch {epoch}")
 

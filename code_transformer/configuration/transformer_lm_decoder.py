@@ -25,7 +25,8 @@ class TransformerLMDecoderConfig(ModelConfiguration):
                  concat_query_and_pointer=True,
                  attend_cls_token=False,
                  pointer_attention_type=AttentionType.MULTIHEAD,
-                 target_vocab_size: int = None):
+                 target_vocab_size: int = None,
+                 samples_len_weights=None):
         r"""
         :param lm_encoder: The encoder on which the decoder should be built
         :param sos_id: The ID of the SOS token in the underlying vocabulary. Initially the decoder sequence will be
@@ -62,3 +63,4 @@ class TransformerLMDecoderConfig(ModelConfiguration):
         assert not (
                     use_pointer_query_self_attention and use_pointer_query_linear), "Cannot set both query linear and query self attention"
         self.target_vocab_size = target_vocab_size
+        self.samples_len_weights = samples_len_weights

@@ -17,5 +17,6 @@ if __name__ == '__main__':
 
     config = read_config(args.config_file)
     exe, cmd = parse_command(config)
+    print(cmd)
 
     subprocess.check_call(cmd, shell=True)

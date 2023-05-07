@@ -19,5 +19,9 @@ _pycache__
 bin/
 data/
 experiments_results/
+experiments_results_len_balanced/
 logs/
 models/
+pythonpath.bat
+notebooks/stuff.ipynb
+samples_info/

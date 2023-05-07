@@ -2,7 +2,6 @@ from code_transformer.experiments.experiment import ExperimentSetup, ex
 from code_transformer.experiments.mixins.code_summarization import CTCodeSummarizationMixin
 from code_transformer.experiments.mixins.code_trans_transformer import CodeTransformerDecoderMixin
 
-
 class CodeTransDecoderExperimentSetup(CodeTransformerDecoderMixin,
                                       CTCodeSummarizationMixin,
                                       ExperimentSetup):

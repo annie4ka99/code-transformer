@@ -1,4 +1,6 @@
 from abc import ABC
+import torch
+import numpy as np
 
 from code_transformer.experiments.experiment import ex, ExperimentSetup
 from code_transformer.modeling.constants import NUM_SUB_TOKENS_METHOD_NAME, NUM_SUB_TOKENS
@@ -9,6 +11,7 @@ from code_transformer.preprocessing.dataset.code_summarization import CTCodeSumm
 from code_transformer.preprocessing.graph.distances import DistanceBinning
 from code_transformer.preprocessing.graph.transform import TokenDistancesTransform
 from code_transformer.env import DATA_PATH_STAGE_2
+from code_transformer.modeling.constants import MAX_NUM_TOKENS
 
 
 class CTCodeSummarizationMixin(ExperimentSetup, ABC):
@@ -18,13 +21,15 @@ class CTCodeSummarizationMixin(ExperimentSetup, ABC):
                    num_sub_tokens=NUM_SUB_TOKENS, num_subtokens_output=NUM_SUB_TOKENS_METHOD_NAME, use_only_ast=False,
                    use_no_punctuation=False,
                    use_pointer_network=False, sort_by_length=False, chunk_size=None, filter_language=None,
-                   dataset_imbalance=None, mask_all_tokens=False):
+                   dataset_imbalance=None, mask_all_tokens=False,
+                   max_num_tokens=MAX_NUM_TOKENS, length_bins_num=None, max_samples_per_bin_train=None, max_samples_per_bin_val=None):
         self.data_manager = CTBufferedDataManager(DATA_PATH_STAGE_2, language, shuffle=True,
                                                   infinite_loading=True,
                                                   mini_dataset=mini_dataset, sort_by_length=sort_by_length,
                                                   chunk_size=chunk_size, filter_language=filter_language,
                                                   dataset_imbalance=dataset_imbalance)
         vocabs = self.data_manager.load_vocabularies()
+
         if len(vocabs) == 4:
             self.word_vocab, self.token_type_vocab, self.node_type_vocab, self.method_name_vocab = vocabs
             self.use_separate_vocab = True
@@ -58,13 +63,17 @@ class CTCodeSummarizationMixin(ExperimentSetup, ABC):
                                                                          max_distance_mask=self.max_distance_mask,
                                                                          num_sub_tokens=num_sub_tokens,
                                                                          num_sub_tokens_output=num_subtokens_output,
-                                                                         use_pointer_network=use_pointer_network)
+                                                                         use_pointer_network=use_pointer_network,
+                                                                         max_num_tokens=max_num_tokens,
+                                                                         length_bins_num=length_bins_num, max_samples_per_bin=max_samples_per_bin_train
+                                                                         )
         else:
             self.dataset_train = CTCodeSummarizationDataset(self.data_manager, token_distances=token_distances,
                                                             max_distance_mask=self.max_distance_mask,
                                                             num_sub_tokens=num_sub_tokens,
                                                             num_sub_tokens_output=num_subtokens_output,
-                                                            use_pointer_network=use_pointer_network)
+                                                            use_pointer_network=use_pointer_network
+                                                            )
 
         self.use_validation = use_validation
         if self.use_validation:
@@ -86,14 +95,17 @@ class CTCodeSummarizationMixin(ExperimentSetup, ABC):
                                                                                   max_distance_mask=self.max_distance_mask,
                                                                                   num_sub_tokens=num_sub_tokens,
                                                                                   num_sub_tokens_output=num_subtokens_output,
-                                                                                  use_pointer_network=use_pointer_network)
+                                                                                  use_pointer_network=use_pointer_network,
+                                                                                  max_num_tokens=max_num_tokens,
+                                                                                  length_bins_num=length_bins_num, max_samples_per_bin=max_samples_per_bin_val)
             else:
                 self.dataset_validation = CTCodeSummarizationDataset(data_manager_validation,
                                                                      token_distances=token_distances,
                                                                      max_distance_mask=self.max_distance_mask,
                                                                      num_sub_tokens=num_sub_tokens,
                                                                      num_sub_tokens_output=num_subtokens_output,
-                                                                     use_pointer_network=use_pointer_network)
+                                                                     use_pointer_network=use_pointer_network
+                                                                     )
 
         self.dataset_validation_creator = \
             lambda infinite_loading: self._create_validation_dataset(DATA_PATH_STAGE_2,
@@ -107,11 +119,15 @@ class CTCodeSummarizationMixin(ExperimentSetup, ABC):
                                                                      use_pointer_network,
                                                                      filter_language,
                                                                      dataset_imbalance,
-                                                                     mask_all_tokens)
+                                                                     mask_all_tokens,
+                                                                     max_num_tokens=max_num_tokens,
+                                                                     length_bins_num=length_bins_num, max_samples_per_bin_val=max_samples_per_bin_val)
 
     def _create_validation_dataset(self, data_location, language, use_only_ast, use_no_punctuation, token_distances,
                                    num_sub_tokens, num_subtokens_output, infinite_loading, use_pointer_network,
-                                   filter_language, dataset_imbalance, mask_all_tokens):
+                                   filter_language, dataset_imbalance, mask_all_tokens, 
+                                   max_num_tokens=MAX_NUM_TOKENS, 
+                                   length_bins_num=None, max_samples_per_bin_val=None):
         data_manager_validation = CTBufferedDataManager(data_location, language, partition="valid",
                                                         shuffle=True, infinite_loading=infinite_loading,
                                                         filter_language=filter_language,
@@ -130,7 +146,9 @@ class CTCodeSummarizationMixin(ExperimentSetup, ABC):
                                                                          max_distance_mask=self.max_distance_mask,
                                                                          num_sub_tokens=num_sub_tokens,
                                                                          num_sub_tokens_output=num_subtokens_output,
-                                                                         use_pointer_network=use_pointer_network)
+                                                                         use_pointer_network=use_pointer_network,
+                                                                         max_num_tokens=max_num_tokens,
+                                                                         length_bins_num=length_bins_num, max_samples_per_bin=max_samples_per_bin_val)
         else:
             dataset_validation = CTCodeSummarizationDataset(data_manager_validation,
                                                             token_distances=token_distances,
