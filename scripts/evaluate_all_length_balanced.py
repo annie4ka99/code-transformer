@@ -2,17 +2,12 @@ import os
 
 from .evaluate_with_lens import evaluate
 
-snapshot = 'latest'
 partition = 'test'
 batch_size = 32
 limit_tokens = 512
 model='code_transformer'
 label='CT'
-models = [dict(run_id=9,  desc='balanced_sampling', snapshots=['latest']),
-          dict(run_id=12, desc='balanced_normilized_weigts_1', snapshots=['latest']),
-          dict(run_id=13, desc='balanced_normilized_weigts_2', snapshots=['latest']),
-          dict(run_id=11, desc='balanced_weights', snapshots=['10000', '30000', '60000']),
-          ]
+models = [dict(run_id=12, desc='balanced_normilized_weigts', snapshots=['latest'])]
 
 results_dir = 'experiments_results_len_balanced'
 
